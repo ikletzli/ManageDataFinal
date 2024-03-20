@@ -1,5 +1,8 @@
 import pandas as pd
 
+
+# Data Loading Methods =================================================================================================
+
 def LoadData():
     author_data = LoadAuthors()
     address_data = LoadAddresses()
@@ -8,8 +11,8 @@ def LoadData():
 
 
 def LoadAuthors():
-    return {}
+    return set()
 
 
 def LoadAddresses():
-    return {}
+    return set()
