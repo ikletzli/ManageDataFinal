@@ -55,6 +55,23 @@ def GeneratingCandidateReplacements(author_data, address_data):
             
     return author_candidates, address_candidates
 
+def BuildTransformationGraphs(author_candidates, address_candidates):
+    author_candidates, address_candidates
+
+    for candidate in author_candidates:
+        pre_defined_regex = ["[A-Z]+", "[a-z]+", "\s+", "[0-9]+"]
+        matches = {"[A-Z]+": [], "[a-z]+": [], "\s+": [], "[0-9]+": []}
+        for regex in pre_defined_regex:
+            match = ""
+            match_pos = 0
+            while match != None:
+                match = re.search(regex, candidate[0][match_pos:])
+                if match != None:
+                    match_pos = match.start() + 1
+                    match_list = matches[regex]
+                    match_list.append(match)
+                    matches[regex] = match_list
+
 if __name__ == "__main__":
     author_data, address_data = LoadData()
 
