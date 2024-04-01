@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import re
+import time
 
 # # Data Loading Methods =================================================================================================
 
@@ -58,6 +59,7 @@ def GeneratingCandidateReplacements(author_data, address_data):
     return author_candidates, address_candidates
 
 def BuildTransformationGraphs(author_candidates, address_candidates):
+    count = 0
     for candidate in author_candidates:
         pre_defined_regex = ["[A-Z]+", "[a-z]+", "\s+", "[0-9]+"]
         matches = {"[A-Z]+": [], "[a-z]+": [], "\s+": [], "[0-9]+": []}
@@ -96,8 +98,8 @@ def BuildTransformationGraphs(author_candidates, address_candidates):
 
         for i in range(len(candidate[0]) + 1):
             k = i+1
-            str_one = "const" + str(k)
-            str_two = "const" + str(k - len(candidate[0]) - 2)
+            str_one = "constpos" + str(k)
+            str_two = "constpos" + str(k - len(candidate[0]) - 2)
 
             if k not in P:
                 P[k] = [str_one, str_two]
@@ -106,13 +108,26 @@ def BuildTransformationGraphs(author_candidates, address_candidates):
                 labels.append(str_one)
                 labels.append(str_two)
                 P[k] = labels
-        
+
+        graph = {}
+        for i in range(len(candidate[1]) - 1):
+            for j in range(i+1, len(candidate[1])):
+                sub = candidate[1][i:j]
+                graph[(i,j)] = ["conststr" + sub]
+                for match in re.finditer(re.escape(sub), candidate[0]):
+                    for f in P[match.start()]:
+                        for g in P[match.end()]:
+                            graph[(i,j)] += ["sub" + f + g]
+        count += 1 
 if __name__ == "__main__":
     author_data, address_data = LoadData()
 
     author_candidates, address_candidates = GeneratingCandidateReplacements(author_data, address_data)
 
+    start = time.time()
     BuildTransformationGraphs(author_candidates, address_candidates)
+    end = time.time()
+    print(end - start)
 
 
     # print(author_data)
