@@ -46,7 +46,6 @@ def GeneratingCandidateReplacements(author_data, address_data):
         for i in range(len(author_list) - 1):
             for j in range(i+1, len(author_list)):
                 author_candidates.append((author_list[i], author_list[j]))
-                author_candidates.append((author_list[j], author_list[i]))
 
     address_candidates = []
     for index in range(len(address_data)):
@@ -54,81 +53,86 @@ def GeneratingCandidateReplacements(author_data, address_data):
         for i in range(len(address_list) - 1):
             for j in range(i+1, len(address_list)):
                 address_candidates.append((address_list[i], address_list[j]))
-                address_candidates.append((address_list[j], address_list[i]))
             
     return author_candidates, address_candidates
 
 def BuildTransformationGraphs(author_candidates, address_candidates):
-    count = 0
-    for candidate in author_candidates:
+    author_graphs = BuildTransformationGraph(author_candidates)
+    address_graphs = BuildTransformationGraph(address_candidates)
+
+def BuildTransformationGraph(candidates):
+    graphs = []
+    for candidate in candidates:
         pre_defined_regex = ["[A-Z]+", "[a-z]+", "\s+", "[0-9]+"]
-        matches = {"[A-Z]+": [], "[a-z]+": [], "\s+": [], "[0-9]+": []}
+        matches_0 = {"[A-Z]+": [], "[a-z]+": [], "\s+": [], "[0-9]+": []}
+        matches_1 = {"[A-Z]+": [], "[a-z]+": [], "\s+": [], "[0-9]+": []}
         for regex in pre_defined_regex:
             for match in re.finditer(regex, candidate[0]):
-                match_list = matches[regex]
-                match_list.append(match)
-                matches[regex] = match_list
-        
-        P = {}
-        for regex, match_list in matches.items():
-            for i in range(len(match_list)):
-                match = match_list[i]
+                matches_0[regex] += [match]
+            for match in re.finditer(regex, candidate[1]):
+                matches_1[regex] += [match]
 
-                x_str_one = "match" + regex + str(i+1) + "B"
-                x_str_two = "match" + regex + str(i-len(match_list)) + "B"
+        P_0 = {}
+        P_1 = {}
+        for match_dict, P in [(matches_0, P_0), (matches_1, P_1)]:
+            for regex, match_list in match_dict.items():
+                for i in range(len(match_list)):
+                    match = match_list[i]
 
-                y_str_one = "match" + regex + str(i+1) + "E"
-                y_str_two = "match" + regex + str(i-len(match_list)) + "E"
+                    x_str_one = "match" + regex + str(i+1) + "B"
+                    x_str_two = "match" + regex + str(i-len(match_list)) + "B"
 
-                if match.start() not in P:
-                    P[match.start()] = [x_str_one, x_str_two]
+                    y_str_one = "match" + regex + str(i+1) + "E"
+                    y_str_two = "match" + regex + str(i-len(match_list)) + "E"
+
+                    if match.start() not in P:
+                        P[match.start()] = [x_str_one, x_str_two]
+                    else:
+                        P[match.start()] += [x_str_one, x_str_two]
+
+                    if match.end() not in P:
+                        P[match.end()] = [y_str_one, y_str_two]
+                    else:
+                        P[match.end()] += [y_str_one, y_str_two]
+
+        for index, P in [(0, P_0), (1, P_1)]:
+            for i in range(len(candidate[index]) + 1):
+                k = i+1
+                str_one = "constpos" + str(k)
+                str_two = "constpos" + str(k - len(candidate[index]) - 2)
+
+                if k not in P:
+                    P[k] = [str_one, str_two]
                 else:
-                    labels = P[match.start()] 
-                    labels.append(x_str_one)
-                    labels.append(x_str_two)
-                    P[match.start()] = labels
+                    P[k] += [str_one, str_two]
 
-                if match.end() not in P:
-                    P[match.end()] = [y_str_one, y_str_two]
-                else:
-                    labels = P[match.end()] 
-                    labels.append(y_str_one)
-                    labels.append(y_str_two)
-                    P[match.end()] = labels
+        graph_0 = {}
+        graph_1 = {}
 
-        for i in range(len(candidate[0]) + 1):
-            k = i+1
-            str_one = "constpos" + str(k)
-            str_two = "constpos" + str(k - len(candidate[0]) - 2)
+        for i in range(len(candidate[0])):
+            for j in range(i+1, len(candidate[0]) + 1):
+                sub = candidate[0][i:j]
+                graph_0[(i,j)] = ["conststr" + sub]
 
-            if k not in P:
-                P[k] = [str_one, str_two]
-            else:
-                labels = P[k] 
-                labels.append(str_one)
-                labels.append(str_two)
-                P[k] = labels
-
-        graph = {}
         for i in range(len(candidate[1]) - 1):
             for j in range(i+1, len(candidate[1])):
                 sub = candidate[1][i:j]
-                graph[(i,j)] = ["conststr" + sub]
+                graph_1[(i,j)] = ["conststr" + sub]
                 for match in re.finditer(re.escape(sub), candidate[0]):
-                    for f in P[match.start()]:
-                        for g in P[match.end()]:
-                            graph[(i,j)] += ["sub" + f + g]
-        count += 1 
+                    for f in P_0[match.start()]:
+                        for g in P_0[match.end()]:
+                            graph_1[(i,j)] += ["sub" + f + g]
+                    for f in P_1[i]:
+                        for g in P_1[j]:
+                            graph_0[(match.start(),match.end())] += ["sub" + f + g]
+
+        graphs += [graph_0, graph_1]
+    
+    return graphs
+
 if __name__ == "__main__":
     author_data, address_data = LoadData()
 
     author_candidates, address_candidates = GeneratingCandidateReplacements(author_data, address_data)
 
-    start = time.time()
     BuildTransformationGraphs(author_candidates, address_candidates)
-    end = time.time()
-    print(end - start)
-
-
-    # print(author_data)
-    # print(address_data)
