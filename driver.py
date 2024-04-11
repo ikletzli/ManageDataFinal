@@ -87,13 +87,50 @@ def GeneratingCandidateReplacements(author_data, address_data):
 
 # Graph Construction Methods ===========================================================================================
 
-def BuildTransformationGraphs(author_candidates, address_candidates):
-    '''
-    Wrapper method to create graphs for both data sets
-    '''
+# Algorithm 2
+def UnsupervisedGrouping(author_candidates, address_candidates):
     author_graphs = BuildTransformationGraph(author_candidates)
     address_graphs = BuildTransformationGraph(address_candidates)
+    author_inverted = InvertedIndexAlg2(author_graphs)
+    address_inverted = InvertedIndexAlg2(address_graphs)
+    
+    grouping = {}
+    for graph in author_graphs:
+        n_last = 0
+        for key in graph.keys():
+            if key[1] > n_last:
+                n_last = key[1]
+                
+        pmax, lmax = SearchPivot(graph, "", author_graphs, 0, None, [], n_last, author_inverted)
+        if pmax in grouping:
+            grouping[pmax] += [graph]
+        else:
+            grouping[pmax] = [graph]
 
+    return grouping
+
+def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted):
+    
+    if n_first == n_last:
+        if len(graphs) > len(lmax):
+            return path, graphs
+    else:
+        for edge, str_functions in graph.items():
+            for str_fun in str_functions:
+                p_prime = path + str_fun
+                l_prime = []
+                if n_first == 0:
+                    l_prime = inverted[str_fun] # [(i, edge[0], edge[1])]
+                else:
+                    for g1, i1, j1 in graphs:
+                        for g2, i2, j2 in inverted[str_fun]:
+                            if g1 == g2:
+                                if j1 == i2:
+                                    l_prime.append(g1, i1, j2)
+                                    
+                pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, inverted)
+
+    return pmax, lmax
 
 def BuildTransformationGraph(candidates):
     '''
@@ -169,12 +206,30 @@ def BuildTransformationGraph(candidates):
                             graph_0[(match.start(),match.end())] += ["sub" + f + g]
 
         graphs += [graph_0, graph_1]
-
-        print(graphs)
-        exit()
     
     return graphs
 
+def InvertedIndexAlg2(graphs):
+    '''
+    Helper method to create an inverted index structure over the provided graphs
+    Used in Algorithms 2, 6
+
+    arguments: set of graphs
+    return value: dictionary containing index mapping
+    '''
+    I = {}
+
+    for i in range(len(graphs)):
+        graph = graphs[i]
+        for edge in graph:
+            edge_labels = graph[edge]
+            for edge_label in edge_labels:
+                if edge_label in I:
+                    I[edge_label] += [(i, edge[0], edge[1])]
+                else:
+                    I[edge_label] = [(i, edge[0], edge[1])]
+
+    return I
 
 def InvertedIndex(graphs):
     '''
