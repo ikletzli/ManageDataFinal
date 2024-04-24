@@ -3,16 +3,29 @@ import numpy as np
 import re
 
 from tqdm import tqdm
-
+import argparse
 
 # Data Loading Methods =================================================================================================
 
-def LoadData():
+def LoadData(add_sample, auth_sample):
     '''
     Wrapper method to load both data sets
     '''
     author_data = LoadAuthors()
     address_data = LoadAddresses()
+    
+    if add_sample != None and int(add_sample) < len(address_data):
+        address_data = address_data.sample(n=int(add_sample), random_state=42)
+        
+    if auth_sample != None and int(auth_sample) < len(author_data):
+        author_data = author_data.sample(n=int(auth_sample), random_state=42)
+
+    # uncomment to test very small example
+    #author_data = {'isbn': [1, 1, 1, 2, 2, 2], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith"]}
+    #author_data = pd.DataFrame(data=author_data)
+
+    address_data = address_data.groupby('ein')['address'].agg(set= lambda x: set(x))
+    author_data = author_data.groupby('isbn')['author'].agg(set= lambda x: set(x))
 
     return author_data, address_data
 
@@ -32,9 +45,8 @@ def LoadAddresses():
     address_df['EIN'] = address_df['EIN'].astype('int64')
 
     address_df = address_df.rename(columns={'EIN': 'ein', 'Street Address 1': 'address'})
-
     address_df = address_df.fillna('')
-    address_df = address_df.groupby('ein')['address'].agg(set= lambda x: set(x))
+    
     return address_df
 
 
@@ -48,14 +60,12 @@ def LoadAuthors():
 
     book_df = book_df.fillna('')
 
-    book_df = book_df.groupby('isbn')['author'].agg(set= lambda x: set(x))
-
     return book_df
 
 
 # Unsupervised Grouping Methods ========================================================================================
 
-def GeneratingCandidateReplacements(author_data, address_data):
+def GeneratingCandidateReplacements(data):
     '''
     Creates the sets of replacement candidates from the relevent columns of the data set
 
@@ -68,40 +78,39 @@ def GeneratingCandidateReplacements(author_data, address_data):
     #   above line 56
     #   and the respective line for adresses above line 64
 
-    author_candidates = []
-    for index in tqdm(range(len(author_data)), 'generating author candidates'):
-        author_list = list(author_data.iloc[index, 0])
-        for i in range(len(author_list) - 1):
-            for j in range(i+1, len(author_list)):
-                author_candidates.append((author_list[i], author_list[j]))
-
-    address_candidates = []
-    for index in tqdm(range(len(address_data)), 'generating address candidates'):
-        address_list = list(address_data.iloc[index, 0])
-        for i in range(len(address_list) - 1):
-            for j in range(i+1, len(address_list)):
-                address_candidates.append((address_list[i], address_list[j]))
+    candidates = []
+    for index in tqdm(range(len(data)), 'generating author candidates'):
+        candidate_list = list(data.iloc[index, 0])
+        for i in range(len(candidate_list) - 1):
+            for j in range(i+1, len(candidate_list)):
+                candidates.append((candidate_list[i], candidate_list[j]))
             
-    return author_candidates, address_candidates
+    return candidates
 
 
 # Graph Construction Methods ===========================================================================================
 
-# Algorithm 2
-def UnsupervisedGrouping(author_candidates, address_candidates):
-    author_graphs = BuildTransformationGraph(author_candidates)
-    address_graphs = BuildTransformationGraph(address_candidates)
-    author_inverted = InvertedIndexAlg2(author_graphs)
-    address_inverted = InvertedIndexAlg2(address_graphs)
+# Algorithm 1
+def GoldenRecordCreation(data):
+    candidates = GeneratingCandidateReplacements(data)
+    print(candidates)
+    grouping = UnsupervisedGrouping(candidates)
+    sorted_grouping = dict(sorted(grouping.items(), key=lambda x: len(x[1]), reverse=True))
     
+# Algorithm 2
+def UnsupervisedGrouping(candidates):
+    graphs = BuildTransformationGraph(candidates)
+    author_inverted = InvertedIndexAlg2(graphs)
+
     grouping = {}
-    for graph in author_graphs:
+    for graph in graphs:
         n_last = 0
         for key in graph.keys():
             if key[1] > n_last:
                 n_last = key[1]
                 
-        pmax, lmax = SearchPivot(graph, "", author_graphs, 0, None, [], n_last, author_inverted)
+        pmax, lmax = SearchPivot(graph, "", graphs, 0, None, [], n_last, author_inverted)
+        
         if pmax in grouping:
             grouping[pmax] += [graph]
         else:
@@ -128,7 +137,7 @@ def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted):
                                 if j1 == i2:
                                     l_prime.append(g1, i1, j2)
                                     
-                pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, inverted)
+                pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, n_last, inverted)
 
     return pmax, lmax
 
@@ -143,8 +152,10 @@ def BuildTransformationGraph(candidates):
     graphs = []
     for candidate in tqdm(candidates, 'generating transformation graphs'):
         pre_defined_regex = [r"[A-Z]+", r"[a-z]+", r"\s+", r"[0-9]+"]
-        matches_0 = {"[A-Z]+": [], "[a-z]+": [], "\s+": [], "[0-9]+": []}
-        matches_1 = {"[A-Z]+": [], "[a-z]+": [], "\s+": [], "[0-9]+": []}
+        matches_0 = {r"[A-Z]+": [], r"[a-z]+": [], r"\s+": [], r"[0-9]+": []}
+        matches_1 = {r"[A-Z]+": [], r"[a-z]+": [], r"\s+": [], r"[0-9]+": []}
+        # now only finds full matches i.e "abc" and doesn't separate into "abc" "ab" "bc" "a" "b" "c"
+        # might need to make that change but not sure
         for regex in pre_defined_regex:
             for match in re.finditer(regex, candidate[0]):
                 matches_0[regex] += [match]
@@ -180,10 +191,10 @@ def BuildTransformationGraph(candidates):
                 str_one = "constpos" + str(k)
                 str_two = "constpos" + str(k - len(candidate[index]) - 2)
 
-                if k not in P:
-                    P[k] = [str_one, str_two]
+                if i not in P:
+                    P[i] = [str_one, str_two]
                 else:
-                    P[k] += [str_one, str_two]
+                    P[i] += [str_one, str_two]
 
         graph_0 = {}
         graph_1 = {}
@@ -193,8 +204,8 @@ def BuildTransformationGraph(candidates):
                 sub = candidate[0][i:j]
                 graph_0[(i,j)] = ["conststr" + sub]
 
-        for i in range(len(candidate[1]) - 1):
-            for j in range(i+1, len(candidate[1])):
+        for i in range(len(candidate[1])):
+            for j in range(i+1, len(candidate[1]) + 1):
                 sub = candidate[1][i:j]
                 graph_1[(i,j)] = ["conststr" + sub]
                 for match in re.finditer(re.escape(sub), candidate[0]):
@@ -330,8 +341,20 @@ def UpdateGraph(G, sigma):
 # Driver ===============================================================================================================
 
 if __name__ == "__main__":
-    author_data, address_data = LoadData()
+    
+    parser = argparse.ArgumentParser(description="My Python script with options -a and -b")
+    parser.add_argument("--address", help="Enable option -a")
+    parser.add_argument("--author", help="Enable option -b")
 
-    author_candidates, address_candidates = GeneratingCandidateReplacements(author_data, address_data)
+    args = parser.parse_args()
 
-    # BuildTransformationGraphs(author_candidates, address_candidates)
+    add_sample = None
+    auth_sample = None
+    if args.address:
+        add_sample = args.address
+    if args.author:
+        auth_sample = args.author
+    
+    author_data, address_data = LoadData(add_sample, auth_sample)
+    
+    GoldenRecordCreation(author_data)
