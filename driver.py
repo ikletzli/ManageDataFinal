@@ -21,8 +21,8 @@ def LoadData(add_sample, auth_sample):
         author_data = author_data.sample(n=int(auth_sample), random_state=42)
 
     # uncomment to test very small example
-    #author_data = {'isbn': [1, 1, 1, 2, 2, 2], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith"]}
-    #author_data = pd.DataFrame(data=author_data)
+    # author_data = {'isbn': [1, 1, 1, 2, 2, 2, 3, 3, 3], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith", "Jim Choo", "Choo, Jim", "J. Choo"]}
+    # author_data = pd.DataFrame(data=author_data)
 
     address_data = address_data.groupby('ein')['address'].agg(set= lambda x: set(x))
     author_data = author_data.groupby('isbn')['author'].agg(set= lambda x: set(x))
@@ -90,58 +90,129 @@ def GeneratingCandidateReplacements(data):
 
 # Graph Construction Methods ===========================================================================================
 
+def get_string_fun_index(sub, val):
+    return_val = None
+    if sub.startswith("pos"):
+        const = int(sub[3:])
+        if const < 0:
+            return_val = len(val) + const + 1
+        else:
+            return_val = const - 1
+    else:
+        parsed = sub[:-1]
+        parsed = parsed.split("+")
+        parsed[0] += "+"
+        parsed += sub[-1]
+        
+        matches = []
+        for match in re.finditer(parsed[0], val):
+            matches += [match]
+            
+        index = 0
+        if int(parsed[1]) > 0:
+            index = int(parsed[1]) - 1
+        else:
+            index = len(matches) + int(parsed[1])
+    
+        if parsed[2] == "B":
+            return_val = matches[index].start()
+        else:
+            return_val = matches[index].end()
+
+    return return_val
+
+def ApplyGrouping(values, transform_str):
+    for val in values:
+        if transform_str != None:
+            steps = transform_str.replace("conststr", "sub").split("sub")
+            new_str = ""
+            for step in steps:
+                if step != "":
+                    if step.startswith("match") or step.startswith("constpos"):
+                        sub = step.replace("match", "const").split("const")
+                        sub = list(filter(None, sub))
+                        
+                        first = get_string_fun_index(sub[0], val[0])
+                        second = get_string_fun_index(sub[1], val[0])
+
+                        new_str += val[0][first:second]
+                    else:
+                        new_str += step
+                    
+            print("\t", val[0], "|", val[1], "|", new_str)
+
+
 # Algorithm 1
 def GoldenRecordCreation(data):
     candidates = GeneratingCandidateReplacements(data)
-    print(candidates)
     grouping = UnsupervisedGrouping(candidates)
     sorted_grouping = dict(sorted(grouping.items(), key=lambda x: len(x[1]), reverse=True))
+    for key, value in sorted_grouping.items():
+        print(key)
+        ApplyGrouping(value, key)
     
 # Algorithm 2
 def UnsupervisedGrouping(candidates):
-    graphs = BuildTransformationGraph(candidates)
-    author_inverted = InvertedIndexAlg2(graphs)
-
+    graphs = BuildTransformationGraph(candidates,True)
+    inverted = InvertedIndexAlg2([graph[2] for graph in graphs])
+    global glo
+    glo = [1] * len(graphs)
     grouping = {}
-    for graph in graphs:
+    
+    index = 0
+    for str, replace, graph in tqdm(graphs,"lol"):
         n_last = 0
         for key in graph.keys():
             if key[1] > n_last:
                 n_last = key[1]
-                
-        pmax, lmax = SearchPivot(graph, "", graphs, 0, None, [], n_last, author_inverted)
         
+        pmax, lmax = SearchPivot(graph, "", graphs, 0, None, [], n_last, inverted, index)
+        index += 1
         if pmax in grouping:
-            grouping[pmax] += [graph]
+            grouping[pmax] += [(str, replace)]
         else:
-            grouping[pmax] = [graph]
+            grouping[pmax] = [(str, replace)]
 
     return grouping
 
-def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted):
-    
+def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted, g_i):
+    global glo
     if n_first == n_last:
-        if len(graphs) > len(lmax):
-            return path, graphs
+        new_graphs = []
+        for g, i, j, l in graphs:
+            if j == l:
+                new_graphs.append((g,i,j,l))
+                
+        for g, _, _, _ in new_graphs:
+            if glo[g] < len(new_graphs):
+                glo[g] = len(new_graphs)
+                
+        if len(new_graphs) > len(lmax):
+            return path, new_graphs
     else:
         for edge, str_functions in graph.items():
+            if edge[0] < n_first:
+                continue
             for str_fun in str_functions:
                 p_prime = path + str_fun
                 l_prime = []
                 if n_first == 0:
-                    l_prime = inverted[str_fun] # [(i, edge[0], edge[1])]
+                    for g, i, j, l in inverted[str_fun]:
+                        if i == 0:
+                            l_prime.append((g,i,j,l)) # [(i, edge[0], edge[1], last)]
+                    #l_prime = inverted[str_fun] # [(i, edge[0], edge[1])]
                 else:
-                    for g1, i1, j1 in graphs:
-                        for g2, i2, j2 in inverted[str_fun]:
+                    for g1, i1, j1, l1 in graphs:
+                        for g2, i2, j2, l2 in inverted[str_fun]:
                             if g1 == g2:
                                 if j1 == i2:
-                                    l_prime.append(g1, i1, j2)
-                                    
-                pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, n_last, inverted)
+                                    l_prime.append((g1, i1, j2, l2))
+                if len(l_prime) > len(lmax) and len(l_prime) >= glo[g_i]:
+                    pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, n_last, inverted, False)
 
     return pmax, lmax
 
-def BuildTransformationGraph(candidates):
+def BuildTransformationGraph(candidates, keep_strings=False):
     '''
     Algorithm 8
     Turns each set of candidates into a graph representing the transformation graph between those candidates
@@ -154,8 +225,6 @@ def BuildTransformationGraph(candidates):
         pre_defined_regex = [r"[A-Z]+", r"[a-z]+", r"\s+", r"[0-9]+"]
         matches_0 = {r"[A-Z]+": [], r"[a-z]+": [], r"\s+": [], r"[0-9]+": []}
         matches_1 = {r"[A-Z]+": [], r"[a-z]+": [], r"\s+": [], r"[0-9]+": []}
-        # now only finds full matches i.e "abc" and doesn't separate into "abc" "ab" "bc" "a" "b" "c"
-        # might need to make that change but not sure
         for regex in pre_defined_regex:
             for match in re.finditer(regex, candidate[0]):
                 matches_0[regex] += [match]
@@ -216,7 +285,11 @@ def BuildTransformationGraph(candidates):
                         for g in P_1[j]:
                             graph_0[(match.start(),match.end())] += ["sub" + f + g]
 
-        graphs += [graph_0, graph_1]
+        if keep_strings:
+            # tells how to transform graphs[0] to graphs[1]
+            graphs += [(candidate[1], candidate[0], graph_0), (candidate[0], candidate[1], graph_1)]
+        else:    
+            graphs += [graph_0, graph_1]
     
     return graphs
 
@@ -232,13 +305,17 @@ def InvertedIndexAlg2(graphs):
 
     for i in range(len(graphs)):
         graph = graphs[i]
+        n_last = 0
+        for key in graph.keys():
+            if key[1] > n_last:
+                n_last = key[1]
         for edge in graph:
             edge_labels = graph[edge]
             for edge_label in edge_labels:
                 if edge_label in I:
-                    I[edge_label] += [(i, edge[0], edge[1])]
+                    I[edge_label] += [(i, edge[0], edge[1], n_last)]
                 else:
-                    I[edge_label] = [(i, edge[0], edge[1])]
+                    I[edge_label] = [(i, edge[0], edge[1], n_last)]
 
     return I
 
