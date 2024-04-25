@@ -72,12 +72,6 @@ def GeneratingCandidateReplacements(data):
     arguments: authors data set, addresses data set
     return value: list of candidate pairs for both data sets (author candidates, address candidates)
     '''
-    # Paper says maybe we shouldn't include identical values in the candidate replacements,
-    #   so maybe add
-    #     if author_list[i] != author_list[j]
-    #   above line 56
-    #   and the respective line for adresses above line 64
-
     candidates = []
     for index in tqdm(range(len(data)), 'generating author candidates'):
         candidate_list = list(data.iloc[index, 0])
@@ -90,31 +84,42 @@ def GeneratingCandidateReplacements(data):
 
 # Graph Construction Methods ===========================================================================================
 
-def get_string_fun_index(sub, val):
+def GetSubstringIndex(sub, val):
     return_val = None
+    # points to const position
     if sub.startswith("pos"):
         const = int(sub[3:])
         if const < 0:
             return_val = len(val) + const + 1
         else:
             return_val = const - 1
+    # points to regex match
     else:
         parsed = sub[:-1]
         parsed = parsed.split("+")
         parsed[0] += "+"
         parsed += sub[-1]
         
+        regex = parsed[0]
+        match_num = int(parsed[1])
+        
+        # either "B" or "E" for Beginning or End
+        match_pos = parsed[2]
+        
+        # find all matches of regex
         matches = []
-        for match in re.finditer(parsed[0], val):
+        for match in re.finditer(regex, val):
             matches += [match]
-            
+        
+        # find 1st last etc. match of regex based on match_num    
         index = 0
-        if int(parsed[1]) > 0:
-            index = int(parsed[1]) - 1
+        if match_num > 0:
+            index = match_num - 1
         else:
-            index = len(matches) + int(parsed[1])
-    
-        if parsed[2] == "B":
+            index = len(matches) + match_num
+
+        # get index to start or end of match based on match_pos
+        if match_pos == "B":
             return_val = matches[index].start()
         else:
             return_val = matches[index].end()
@@ -124,18 +129,22 @@ def get_string_fun_index(sub, val):
 def ApplyGrouping(values, transform_str):
     for val in values:
         if transform_str != None:
+            # split by transformation type
             steps = transform_str.replace("conststr", "sub").split("sub")
             new_str = ""
             for step in steps:
                 if step != "":
+                    # sub string match based on regex or const position
                     if step.startswith("match") or step.startswith("constpos"):
                         sub = step.replace("match", "const").split("const")
                         sub = list(filter(None, sub))
                         
-                        first = get_string_fun_index(sub[0], val[0])
-                        second = get_string_fun_index(sub[1], val[0])
+                        # sub[0] contains first position and sub[0] contains second position for substring
+                        first = GetSubstringIndex(sub[0], val[0])
+                        second = GetSubstringIndex(sub[1], val[0])
 
                         new_str += val[0][first:second]
+                    # const string transformation
                     else:
                         new_str += step
                     
@@ -155,12 +164,14 @@ def GoldenRecordCreation(data):
 def UnsupervisedGrouping(candidates):
     graphs = BuildTransformationGraph(candidates,True)
     inverted = InvertedIndexAlg2([graph[2] for graph in graphs])
+    
+    # line 2 from Algorithm 4
     global glo
     glo = [1] * len(graphs)
     grouping = {}
     
     index = 0
-    for str, replace, graph in tqdm(graphs,"lol"):
+    for str, replace, graph in tqdm(graphs,"finding pivot paths"):
         n_last = 0
         for key in graph.keys():
             if key[1] > n_last:
@@ -177,12 +188,17 @@ def UnsupervisedGrouping(candidates):
 
 def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted, g_i):
     global glo
+    
+    # transformed graph completely
     if n_first == n_last:
         new_graphs = []
+        
+        # only keep other graphs that were complete transformations
         for g, i, j, l in graphs:
             if j == l:
                 new_graphs.append((g,i,j,l))
-                
+        
+        # lines 3 and 4 from Algorithm 4
         for g, _, _, _ in new_graphs:
             if glo[g] < len(new_graphs):
                 glo[g] = len(new_graphs)
@@ -193,21 +209,24 @@ def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted, g_i)
         for edge, str_functions in graph.items():
             if edge[0] < n_first:
                 continue
+            
             for str_fun in str_functions:
                 p_prime = path + str_fun
                 l_prime = []
+                
+                # valid graphs must have the str_fun and start at 0
                 if n_first == 0:
                     for g, i, j, l in inverted[str_fun]:
                         if i == 0:
                             l_prime.append((g,i,j,l)) # [(i, edge[0], edge[1], last)]
-                    #l_prime = inverted[str_fun] # [(i, edge[0], edge[1])]
                 else:
                     for g1, i1, j1, l1 in graphs:
                         for g2, i2, j2, l2 in inverted[str_fun]:
                             if g1 == g2:
                                 if j1 == i2:
                                     l_prime.append((g1, i1, j2, l2))
-                if len(l_prime) > len(lmax) and len(l_prime) >= glo[g_i]:
+                
+                if len(l_prime) > len(lmax) and len(l_prime) >= glo[g_i]: # line 5 Algorithm 4
                     pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, n_last, inverted, False)
 
     return pmax, lmax
@@ -223,8 +242,11 @@ def BuildTransformationGraph(candidates, keep_strings=False):
     graphs = []
     for candidate in tqdm(candidates, 'generating transformation graphs'):
         pre_defined_regex = [r"[A-Z]+", r"[a-z]+", r"\s+", r"[0-9]+"]
+        
         matches_0 = {r"[A-Z]+": [], r"[a-z]+": [], r"\s+": [], r"[0-9]+": []}
         matches_1 = {r"[A-Z]+": [], r"[a-z]+": [], r"\s+": [], r"[0-9]+": []}
+        
+        # find all matches of the 4 predefined regexes
         for regex in pre_defined_regex:
             for match in re.finditer(regex, candidate[0]):
                 matches_0[regex] += [match]
@@ -233,14 +255,17 @@ def BuildTransformationGraph(candidates, keep_strings=False):
 
         P_0 = {}
         P_1 = {}
+        
         for match_dict, P in [(matches_0, P_0), (matches_1, P_1)]:
             for regex, match_list in match_dict.items():
                 for i in range(len(match_list)):
                     match = match_list[i]
 
+                    # lines 5 and 6
                     x_str_one = "match" + regex + str(i+1) + "B"
                     x_str_two = "match" + regex + str(i-len(match_list)) + "B"
-
+                    
+                    # lines 7 and 8
                     y_str_one = "match" + regex + str(i+1) + "E"
                     y_str_two = "match" + regex + str(i-len(match_list)) + "E"
 
@@ -257,6 +282,8 @@ def BuildTransformationGraph(candidates, keep_strings=False):
         for index, P in [(0, P_0), (1, P_1)]:
             for i in range(len(candidate[index]) + 1):
                 k = i+1
+                
+                # lines 10 and 11
                 str_one = "constpos" + str(k)
                 str_two = "constpos" + str(k - len(candidate[index]) - 2)
 
@@ -278,6 +305,7 @@ def BuildTransformationGraph(candidates, keep_strings=False):
                 sub = candidate[1][i:j]
                 graph_1[(i,j)] = ["conststr" + sub]
                 for match in re.finditer(re.escape(sub), candidate[0]):
+                    # add all substring transformations to either graph
                     for f in P_0[match.start()]:
                         for g in P_0[match.end()]:
                             graph_1[(i,j)] += ["sub" + f + g]
@@ -286,7 +314,7 @@ def BuildTransformationGraph(candidates, keep_strings=False):
                             graph_0[(match.start(),match.end())] += ["sub" + f + g]
 
         if keep_strings:
-            # tells how to transform graphs[0] to graphs[1]
+            # tells how to transform graphs[0] to graphs[1] using graphs[2]
             graphs += [(candidate[1], candidate[0], graph_0), (candidate[0], candidate[1], graph_1)]
         else:    
             graphs += [graph_0, graph_1]
@@ -305,14 +333,18 @@ def InvertedIndexAlg2(graphs):
 
     for i in range(len(graphs)):
         graph = graphs[i]
+        
+        # get the last index in this graph
         n_last = 0
         for key in graph.keys():
             if key[1] > n_last:
                 n_last = key[1]
+                
         for edge in graph:
             edge_labels = graph[edge]
             for edge_label in edge_labels:
                 if edge_label in I:
+                    # keep track of graph, edge, and len of the graph containing this edge_label
                     I[edge_label] += [(i, edge[0], edge[1], n_last)]
                 else:
                     I[edge_label] = [(i, edge[0], edge[1], n_last)]
@@ -419,9 +451,10 @@ def UpdateGraph(G, sigma):
 
 if __name__ == "__main__":
     
-    parser = argparse.ArgumentParser(description="My Python script with options -a and -b")
-    parser.add_argument("--address", help="Enable option -a")
-    parser.add_argument("--author", help="Enable option -b")
+    # setup command line args
+    parser = argparse.ArgumentParser(description="Set the number of samples to test with")
+    parser.add_argument("--address", help="Number of address records to sample")
+    parser.add_argument("--author", help="Number of author records to sample")
 
     args = parser.parse_args()
 
