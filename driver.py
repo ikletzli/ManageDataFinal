@@ -395,7 +395,11 @@ def Preprocessing(phi):
                 for k in range(edge[0], edge[1]):
                     if ubs[k] < len(I[label]):
                         ubs[k] = len(I[label])
-        gub = min(ubs)
+                        
+        if len(ubs) == 0:
+            gub = 0
+        else:
+            gub = min(ubs)
         upper_bounds.append((i, gub))
     
     return graphs, upper_bounds, I
