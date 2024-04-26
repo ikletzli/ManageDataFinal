@@ -401,7 +401,7 @@ def Preprocessing(phi):
     return graphs, upper_bounds, I
 
 
-def GenerateNextLargestGroup(graphs, upper_bounds, inverted):
+def GenerateNextLargestGroup(graphs, upper_bounds, inverted, processed):
     '''
     Algorithm 7
     Analyzes the current set of graphs and determines the next largest group of similar transformations
@@ -422,6 +422,9 @@ def GenerateNextLargestGroup(graphs, upper_bounds, inverted):
 
     for i in tqdm(range(len(upper_bounds)), 'generating next largest group'):
         index = upper_bounds[i][0]
+        if index in processed:
+            continue
+
         graph = graphs[index][2]
 
         gup = upper_bounds[i][1]
@@ -460,7 +463,7 @@ def GenerateNextLargestGroup(graphs, upper_bounds, inverted):
 
         group.append((start, target))
 
-    return pbest, group, upper_bounds
+    return pbest, group, upper_bounds, lbest
 
 
 # Record Creation Methods ==============================================================================================
@@ -489,18 +492,33 @@ def GoldenRecordCreation_Incremental(data, limit):
 
     arguments: data: data set to be transformed
     '''
+    global glo
+
     candidates = GeneratingCandidateReplacements(data)
     graphs, upper_bounds, I = Preprocessing(candidates)
 
-    path, group, upper_bounds= GenerateNextLargestGroup(graphs, upper_bounds, I)
+    path, group, upper_bounds, lbest= GenerateNextLargestGroup(graphs, upper_bounds, I, [])
 
+    processed = []
     while len(group) >= limit:
         print(group)
         ApplyGrouping(group, path)
 
         # remove items in group from graphs, upper_bounds, and I to remove it from the working set
-        exit()
-        path, group, upper_bounds= GenerateNextLargestGroup(graphs, upper_bounds, I)
+        for l in lbest:
+            processed.append(l[0])
+            glo[l[0]] = -1
+
+        for label in I:
+            remove = []
+            for i in range(len(I[label])):
+                if I[label][i][0] in processed:
+                    remove.append(i)
+            remove.sort(reverse=True)
+            for r in remove:
+                I[label].pop(r)
+
+        path, group, upper_bounds, lbest = GenerateNextLargestGroup(graphs, upper_bounds, I, processed)
 
 
 def ApplyGrouping(values, transform_str):
