@@ -22,8 +22,8 @@ def LoadData(add_sample, auth_sample):
         author_data = author_data.sample(n=int(auth_sample), random_state=42)
 
     # uncomment to test very small example
-    author_data = {'isbn': [1, 1, 1, 2, 2, 2, 3, 3, 3], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith", "Jim Choo", "Choo, Jim", "J. Choo"]}
-    author_data = pd.DataFrame(data=author_data)
+    # author_data = {'isbn': [1, 1, 1, 2, 2, 2, 3, 3, 3], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith", "Jim Choo", "Choo, Jim", "J. Choo"]}
+    # author_data = pd.DataFrame(data=author_data)
 
     address_data = address_data.groupby('ein')['address'].agg(set= lambda x: set(x))
     author_data = author_data.groupby('isbn')['author'].agg(set= lambda x: set(x))
