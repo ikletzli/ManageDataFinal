@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import re
+import random
 
 from tqdm import tqdm
 import argparse
@@ -21,8 +22,8 @@ def LoadData(add_sample, auth_sample):
         author_data = author_data.sample(n=int(auth_sample), random_state=42)
 
     # uncomment to test very small example
-    # author_data = {'isbn': [1, 1, 1, 2, 2, 2, 3, 3, 3], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith", "Jim Choo", "Choo, Jim", "J. Choo"]}
-    # author_data = pd.DataFrame(data=author_data)
+    author_data = {'isbn': [1, 1, 1, 2, 2, 2, 3, 3, 3], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith", "Jim Choo", "Choo, Jim", "J. Choo"]}
+    author_data = pd.DataFrame(data=author_data)
 
     address_data = address_data.groupby('ein')['address'].agg(set= lambda x: set(x))
     author_data = author_data.groupby('isbn')['author'].agg(set= lambda x: set(x))
@@ -82,9 +83,15 @@ def GeneratingCandidateReplacements(data):
     return candidates
 
 
-# Graph Construction Methods ===========================================================================================
+# Graph Methods ===========================================================================================
 
 def GetSubstringIndex(sub, val):
+    '''
+    Helper method to find the index of a substring
+
+    arguments: sub: substring to be located, val: the string to search on
+    return value: the start or end of the match, as indicated in the substring
+    '''
     return_val = None
     # points to const position
     if sub.startswith("pos"):
@@ -126,44 +133,17 @@ def GetSubstringIndex(sub, val):
 
     return return_val
 
-def ApplyGrouping(values, transform_str):
-    for val in values:
-        if transform_str != None:
-            # split by transformation type
-            steps = transform_str.replace("conststr", "sub").split("sub")
-            new_str = ""
-            for step in steps:
-                if step != "":
-                    # sub string match based on regex or const position
-                    if step.startswith("match") or step.startswith("constpos"):
-                        sub = step.replace("match", "const").split("const")
-                        sub = list(filter(None, sub))
-                        
-                        # sub[0] contains first position and sub[0] contains second position for substring
-                        first = GetSubstringIndex(sub[0], val[0])
-                        second = GetSubstringIndex(sub[1], val[0])
 
-                        new_str += val[0][first:second]
-                    # const string transformation
-                    else:
-                        new_str += step
-                    
-            print("\t", val[0], "|", val[1], "|", new_str)
-
-
-# Algorithm 1
-def GoldenRecordCreation(data):
-    candidates = GeneratingCandidateReplacements(data)
-    grouping = UnsupervisedGrouping(candidates)
-    sorted_grouping = dict(sorted(grouping.items(), key=lambda x: len(x[1]), reverse=True))
-    for key, value in sorted_grouping.items():
-        print(key)
-        ApplyGrouping(value, key)
-    
-# Algorithm 2
 def UnsupervisedGrouping(candidates):
-    graphs = BuildTransformationGraph(candidates,True)
-    inverted = InvertedIndexAlg2([graph[2] for graph in graphs])
+    '''
+    Algorithm 2
+    Creates groups of common transformations, so that they may be more efficiently applied in bulk
+
+    arguments: candidates: set of transformation candidates
+    return value: transformation candidate groupings
+    '''
+    graphs = BuildTransformationGraph(candidates, True)
+    inverted = InvertedIndex([graph[2] for graph in graphs])
     
     # line 2 from Algorithm 4
     global glo
@@ -171,7 +151,7 @@ def UnsupervisedGrouping(candidates):
     grouping = {}
     
     index = 0
-    for str, replace, graph in tqdm(graphs,"finding pivot paths"):
+    for str, replace, graph in tqdm(graphs, "finding pivot paths"):
         n_last = 0
         for key in graph.keys():
             if key[1] > n_last:
@@ -186,10 +166,19 @@ def UnsupervisedGrouping(candidates):
 
     return grouping
 
+
 def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted, g_i):
+    '''
+    Algorith 3
+    Finds the pivot path for a graph G
+
+    arguments: graph: graph to be searched on, path: current path, graphs: set of graphs, n_first: current node index, 
+               lmax: list of graphs in G containing pmax, n_last: index of final node in graph, inverted: inverted index, g_i: graph index
+    return value: pmax: pivot path for graph, lmax: list of graphs in G containing omax
+    '''
     global glo
     
-    # transformed graph completely
+    # Base case in recursion, completely transformed graph
     if n_first == n_last:
         new_graphs = []
         
@@ -230,6 +219,7 @@ def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted, g_i)
                     pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, n_last, inverted, False)
 
     return pmax, lmax
+
 
 def BuildTransformationGraph(candidates, keep_strings=False):
     '''
@@ -321,7 +311,8 @@ def BuildTransformationGraph(candidates, keep_strings=False):
     
     return graphs
 
-def InvertedIndexAlg2(graphs):
+
+def InvertedIndex(graphs):
     '''
     Helper method to create an inverted index structure over the provided graphs
     Used in Algorithms 2, 6
@@ -351,27 +342,6 @@ def InvertedIndexAlg2(graphs):
 
     return I
 
-def InvertedIndex(graphs):
-    '''
-    Helper method to create an inverted index structure over the provided graphs
-    Used in Algorithms 2, 6
-
-    arguments: set of graphs
-    return value: dictionary containing index mapping
-    '''
-    I = {}
-
-    for graph in graphs:
-        for edge in graph:
-            edge_labels = graph[edge]
-            for edge_label in edge_labels:
-                if edge_label in I:
-                    I[edge_label].append(edge_labels)
-                else:
-                    I[edge_label] = [edge_labels]
-
-    return I
-
 
 # Incremental Grouping Methods =========================================================================================
 
@@ -387,64 +357,180 @@ def IncrementalGrouping():
     sigma = GenerateNextLargestGroup(G)
 
     # replace line 9 of Algorithm 1
-    G = UpdateGraph(G, sigma)
+    # G = UpdateGraph(G, sigma)
 
 
 def Preprocessing(phi):
     '''
     Algorithm 6
     Generates the bounds for the set of graphs G corresponding to the set of candidate replacements phi
-    Differs from BuildTransformationGraph in that it allows the use of Algorithm 7
+    Replaces UnsupervisedGrouping (Alg2) by avoiding calling SearchPivot on each graph as groups are made
+    Instead, we create an upper bound gup on the number of graphs with a pivot path found in G
+    This information will later be used to only searhc for the pivot on the largest group of graphs sharing one
 
     arguments: set of replacement candidates phi
-    return value: set of graphs, and a set of upper bounds for those graphs
+    return value: set of graphs, their corresponding upper bounds, inverted index for use later in algorithm 7
     '''
-    graphs = BuildTransformationGraph(phi)
-    I = InvertedIndex(graphs)
-    bounds = {}
+    graphs = BuildTransformationGraph(phi, keep_strings=True)
+    I = InvertedIndex([graph[2] for graph in graphs])
 
-    for graph in graphs:
-        # initialize upper-bound list
-        largest_index = 0
-        for edge in graph:
-            if edge[1] > largest_index:
-                largest_index = edge[1]
-        upper_bounds = []
-        for i in range(largest_index):
-            upper_bounds.append(0)
+    global glo
+    glo = [1] * len(graphs)
+
+    upper_bounds = []
+
+    for i in tqdm(range(len(graphs)), 'preprocessing graphs'):
+        graph = graphs[i][2]
+
+        n_last = 0
+        for key in graph.keys():
+            if key[1] > n_last:
+                n_last = key[1]
+        ubs = []
+        for j in range(n_last):
+            ubs.append(0)
 
         for edge in graph:
-            for label in edge:
+            for label in graph[edge]:
                 for k in range(edge[0], edge[1]):
-                    if upper_bounds[k] < len(I[label]):
-                        upper_bounds[k] = len(I[label])
-
-        bounds[graph] = min(upper_bounds)
+                    if ubs[k] < len(I[label]):
+                        ubs[k] = len(I[label])
+        gub = min(ubs)
+        upper_bounds.append((i, gub))
     
-    return graphs, bounds
+    return graphs, upper_bounds, I
 
 
-def GenerateNextLargestGroup(G, upper_bounds):
+def GenerateNextLargestGroup(graphs, upper_bounds, inverted):
     '''
     Algorithm 7
     Analyzes the current set of graphs and determines the next largest group of similar transformations
 
-    arguments: set of graphs G, the corresponding set of upper bounds
+    arguments: graphs: set of graphs G, upper_bounds: thhe upper bounds of each graph inverted: iverted index
     return value: list of graphs containing the current longest path in G
     '''
-    l = []
-    return l
+    global glo
+
+    # intitialize largest lower bound of a graph in G
+    tao = max(glo)
+
+    pbest = ''
+    lbest = []
+
+    # sort graphs by upper bound in descending order
+    upper_bounds.sort(reverse=True, key=lambda x: x[1])
+
+    for i in tqdm(range(len(upper_bounds)), 'generating next largest group'):
+        index = upper_bounds[i][0]
+        graph = graphs[index][2]
+
+        gup = upper_bounds[i][1]
+
+        # if the largest lower bound is greater than the upperbound of the graph, terminate
+        if tao >= gup:
+            break
+
+        # initialize lmax to list of tao random graphs
+        lmax = random.sample(graphs, tao)
+
+        # search for the pivot path of graph G
+        n_last = 0
+        for key in graph.keys():
+            if key[1] > n_last:
+                n_last = key[1]
+        
+        # search to see if a pivot path exists in the graph
+        pmax, lmax = SearchPivot(graph, '', graphs, 0, None, lmax, n_last, inverted, index)
+
+        if pmax is not None:
+            gup = len(lmax)
+            upper_bounds[i] = (index, gup)
+            glo[index] = len(lmax)
+            tao = len(lmax)
+            pbest = pmax
+            lbest = lmax
+        else:
+            gup = tao
+            upper_bounds[i] = (index, gup)
+
+    group = []
+    for l in lbest:
+        start = graphs[l[0]][0]
+        target = graphs[l[0]][1]
+
+        group.append((start, target))
+
+    return pbest, group, upper_bounds
 
 
-def UpdateGraph(G, sigma):
+# Record Creation Methods ==============================================================================================
+
+def GoldenRecordCreation(data):
     '''
-    Helper method used to update the set of graphs G
-    Corresponds to the psuedo code description of line 3 of Algorithm 5
+    Algorithm 1
+    transforms a data set to create consistant records for the entities contained within it
 
-    arguments: set of graphs G, group of similar replacements sigma
-    return value: an updated G
+    arguments: data: data set to be transformed
     '''
-    return G
+    candidates = GeneratingCandidateReplacements(data)
+    grouping = UnsupervisedGrouping(candidates)
+    sorted_grouping = dict(sorted(grouping.items(), key=lambda x: len(x[1]), reverse=True))
+    for key, value in sorted_grouping.items():
+        print(key)
+        print(value)
+        ApplyGrouping(value, key)
+
+
+def GoldenRecordCreation_Incremental(data, limit):
+    '''
+    Algorithm 1 (alt)
+    transforms a data set to create consistant records for the entities contained within it
+    Implements the incremental grouping method described by the paper
+
+    arguments: data: data set to be transformed
+    '''
+    candidates = GeneratingCandidateReplacements(data)
+    graphs, upper_bounds, I = Preprocessing(candidates)
+
+    path, group, upper_bounds= GenerateNextLargestGroup(graphs, upper_bounds, I)
+
+    while len(group) >= limit:
+        print(group)
+        ApplyGrouping(group, path)
+
+        # remove items in group from graphs, upper_bounds, and I to remove it from the working set
+        exit()
+        path, group, upper_bounds= GenerateNextLargestGroup(graphs, upper_bounds, I)
+
+
+def ApplyGrouping(values, transform_str):
+    '''
+    Helper method which applies a transformation to the group of candidates it targets
+
+    arguments: values: strings to be transformed, transform_str: the string form of a transformation path
+    '''
+    for val in values:
+        if transform_str != None:
+            # split by transformation type
+            steps = transform_str.replace("conststr", "sub").split("sub")
+            new_str = ""
+            for step in steps:
+                if step != "":
+                    # sub string match based on regex or const position
+                    if step.startswith("match") or step.startswith("constpos"):
+                        sub = step.replace("match", "const").split("const")
+                        sub = list(filter(None, sub))
+                        
+                        # sub[0] contains first position and sub[0] contains second position for substring
+                        first = GetSubstringIndex(sub[0], val[0])
+                        second = GetSubstringIndex(sub[1], val[0])
+
+                        new_str += val[0][first:second]
+                    # const string transformation
+                    else:
+                        new_str += step
+                    
+            print("\t", val[0], "|", val[1], "|", new_str)
 
 
 # Driver ===============================================================================================================
@@ -456,6 +542,8 @@ if __name__ == "__main__":
     parser.add_argument("--address", help="Number of address records to sample")
     parser.add_argument("--author", help="Number of author records to sample")
 
+    parser.add_argument("--incgrouping", help="indicates whether or not incremental grouping should be used, and to what degree")
+
     args = parser.parse_args()
 
     add_sample = None
@@ -466,5 +554,12 @@ if __name__ == "__main__":
         auth_sample = args.author
     
     author_data, address_data = LoadData(add_sample, auth_sample)
-    
-    GoldenRecordCreation(author_data)
+
+    if args.incgrouping:
+        try:
+            count = int(args.incgrouping)
+        except:
+            raise "Argument to --incgrouping flag must be an integer"
+        GoldenRecordCreation_Incremental(author_data, count)
+    else:
+        GoldenRecordCreation(author_data)
