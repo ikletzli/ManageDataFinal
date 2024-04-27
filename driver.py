@@ -83,57 +83,6 @@ def GeneratingCandidateReplacements(data):
     return candidates
 
 
-# Graph Methods ===========================================================================================
-
-def GetSubstringIndex(sub, val):
-    '''
-    Helper method to find the index of a substring
-
-    arguments: sub: substring to be located, val: the string to search on
-    return value: the start or end of the match, as indicated in the substring
-    '''
-    return_val = None
-    # points to const position
-    if sub.startswith("pos"):
-        const = int(sub[3:])
-        if const < 0:
-            return_val = len(val) + const + 1
-        else:
-            return_val = const - 1
-    # points to regex match
-    else:
-        parsed = sub[:-1]
-        parsed = parsed.split("+")
-        parsed[0] += "+"
-        parsed += sub[-1]
-        
-        regex = parsed[0]
-        match_num = int(parsed[1])
-        
-        # either "B" or "E" for Beginning or End
-        match_pos = parsed[2]
-        
-        # find all matches of regex
-        matches = []
-        for match in re.finditer(regex, val):
-            matches += [match]
-        
-        # find 1st last etc. match of regex based on match_num    
-        index = 0
-        if match_num > 0:
-            index = match_num - 1
-        else:
-            index = len(matches) + match_num
-
-        # get index to start or end of match based on match_pos
-        if match_pos == "B":
-            return_val = matches[index].start()
-        else:
-            return_val = matches[index].end()
-
-    return return_val
-
-
 def UnsupervisedGrouping(candidates):
     '''
     Algorithm 2
@@ -219,6 +168,57 @@ def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted, g_i)
                     pmax, lmax = SearchPivot(graph, p_prime, l_prime, edge[1], pmax, lmax, n_last, inverted, False)
 
     return pmax, lmax
+
+
+# Graph Methods ===========================================================================================
+
+def GetSubstringIndex(sub, val):
+    '''
+    Helper method to find the index of a substring
+
+    arguments: sub: substring to be located, val: the string to search on
+    return value: the start or end of the match, as indicated in the substring
+    '''
+    return_val = None
+    # points to const position
+    if sub.startswith("pos"):
+        const = int(sub[3:])
+        if const < 0:
+            return_val = len(val) + const + 1
+        else:
+            return_val = const - 1
+    # points to regex match
+    else:
+        parsed = sub[:-1]
+        parsed = parsed.split("+")
+        parsed[0] += "+"
+        parsed += sub[-1]
+        
+        regex = parsed[0]
+        match_num = int(parsed[1])
+        
+        # either "B" or "E" for Beginning or End
+        match_pos = parsed[2]
+        
+        # find all matches of regex
+        matches = []
+        for match in re.finditer(regex, val):
+            matches += [match]
+        
+        # find 1st last etc. match of regex based on match_num    
+        index = 0
+        if match_num > 0:
+            index = match_num - 1
+        else:
+            index = len(matches) + match_num
+
+        # get index to start or end of match based on match_pos
+        if match_pos == "B":
+            return_val = matches[index].start()
+        else:
+            return_val = matches[index].end()
+
+    return return_val
 
 
 def BuildTransformationGraph(candidates, keep_strings=False):
