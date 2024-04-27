@@ -580,8 +580,12 @@ if __name__ == "__main__":
     if args.incgrouping:
         try:
             count = int(args.incgrouping)
+            if count <= 0:
+                raise
         except:
-            raise "Argument to --incgrouping flag must be an integer"
+            raise "Argument to --incgrouping flag must be an integer greater than 0"
         GoldenRecordCreation_Incremental(author_data, count)
+        GoldenRecordCreation_Incremental(address_data, count)
     else:
         GoldenRecordCreation(author_data)
+        GoldenRecordCreation_Incremental(address_data)
