@@ -8,7 +8,7 @@ import argparse
 
 # Data Loading Methods =================================================================================================
 
-def LoadData(add_sample, auth_sample):
+def LoadData(add_sample, auth_sample, small):
     '''
     Wrapper method to load both data sets
     '''
@@ -20,13 +20,6 @@ def LoadData(add_sample, auth_sample):
         
     if auth_sample != None and int(auth_sample) < len(author_data):
         author_data = author_data.sample(n=int(auth_sample), random_state=42)
-
-    # uncomment to test very small example
-    # author_data = {'isbn': [1, 1, 1, 2, 2, 2, 3, 3, 3], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", "Smith, James", "James Smith", "J. Smith", "Jim Choo", "Choo, Jim", "J. Choo"]}
-    # author_data = pd.DataFrame(data=author_data)
-
-    address_data = address_data.groupby('ein')['address'].agg(set= lambda x: set(x))
-    author_data = author_data.groupby('isbn')['author'].agg(set= lambda x: set(x))
 
     return author_data, address_data
 
@@ -74,11 +67,14 @@ def GeneratingCandidateReplacements(data):
     return value: list of candidate pairs for both data sets (author candidates, address candidates)
     '''
     candidates = []
-    for index in tqdm(range(len(data)), 'generating author candidates'):
-        candidate_list = list(data.iloc[index, 0])
-        for i in range(len(candidate_list) - 1):
-            for j in range(i+1, len(candidate_list)):
-                candidates.append((candidate_list[i], candidate_list[j]))
+    for i in tqdm(range(len(data) - 1), 'generating author candidates'):
+        first_cand = data.iloc[i]
+        for j in range(i+1, len(data)):  
+            sec_cand = data.iloc[j]
+            
+            # check if isbns or eins are equal
+            if first_cand.iloc[0] == sec_cand.iloc[0] and first_cand.iloc[1] != sec_cand.iloc[1]:
+                candidates.append((first_cand.iloc[1], sec_cand.iloc[1], i, j))
             
     return candidates
 
@@ -100,7 +96,7 @@ def UnsupervisedGrouping(candidates):
     grouping = {}
     
     index = 0
-    for str, replace, graph in tqdm(graphs, "finding pivot paths"):
+    for i, j, graph in tqdm(graphs, "finding pivot paths"):
         n_last = 0
         for key in graph.keys():
             if key[1] > n_last:
@@ -109,9 +105,9 @@ def UnsupervisedGrouping(candidates):
         pmax, lmax = SearchPivot(graph, "", graphs, 0, None, [], n_last, inverted, index)
         index += 1
         if pmax in grouping:
-            grouping[pmax] += [(str, replace)]
+            grouping[pmax] += [(i, j)]
         else:
-            grouping[pmax] = [(str, replace)]
+            grouping[pmax] = [(i, j)]
 
     return grouping
 
@@ -126,7 +122,6 @@ def SearchPivot(graph, path, graphs, n_first, pmax, lmax, n_last, inverted, g_i)
     return value: pmax: pivot path for graph, lmax: list of graphs in G containing omax
     '''
     global glo
-    
     # Base case in recursion, completely transformed graph
     if n_first == n_last:
         new_graphs = []
@@ -305,7 +300,7 @@ def BuildTransformationGraph(candidates, keep_strings=False):
 
         if keep_strings:
             # tells how to transform graphs[0] to graphs[1] using graphs[2]
-            graphs += [(candidate[1], candidate[0], graph_0), (candidate[0], candidate[1], graph_1)]
+            graphs += [(candidate[3], candidate[2], graph_0), (candidate[2], candidate[3], graph_1)]
         else:    
             graphs += [graph_0, graph_1]
     
@@ -416,7 +411,10 @@ def GenerateNextLargestGroup(graphs, upper_bounds, inverted, processed):
     global glo
 
     # intitialize largest lower bound of a graph in G
-    tao = max(glo)
+    tao = 0
+    
+    if len(glo) != 0:
+        tao = max(glo)
 
     pbest = ''
     lbest = []
@@ -472,7 +470,7 @@ def GenerateNextLargestGroup(graphs, upper_bounds, inverted, processed):
 
 # Record Creation Methods ==============================================================================================
 
-def GoldenRecordCreation(data):
+def GoldenRecordCreation(data, verbose):
     '''
     Algorithm 1
     transforms a data set to create consistant records for the entities contained within it
@@ -482,13 +480,20 @@ def GoldenRecordCreation(data):
     candidates = GeneratingCandidateReplacements(data)
     grouping = UnsupervisedGrouping(candidates)
     sorted_grouping = dict(sorted(grouping.items(), key=lambda x: len(x[1]), reverse=True))
+    changes = []
     for key, value in sorted_grouping.items():
-        print(key)
-        print(value)
-        ApplyGrouping(value, key)
+        if verbose:
+            print(key)
+        changes += ApplyGrouping(value, key, data, verbose)
+    
+    for change in changes:
+        if small:
+            if "." not in change[1] and "," not in change[1]:
+                data.iat[change[0], 1] = change[1]
+        else:
+            data.iat[change[0], 1] = change[1]
 
-
-def GoldenRecordCreation_Incremental(data, limit):
+def GoldenRecordCreation_Incremental(data, limit, verbose):
     '''
     Algorithm 1 (alt)
     transforms a data set to create consistant records for the entities contained within it
@@ -504,9 +509,11 @@ def GoldenRecordCreation_Incremental(data, limit):
     path, group, upper_bounds, lbest= GenerateNextLargestGroup(graphs, upper_bounds, I, [])
 
     processed = []
+    changes = []
     while len(group) >= limit:
-        print(group)
-        ApplyGrouping(group, path)
+        if verbose:
+            print(path)
+        changes += ApplyGrouping(group, path, data, verbose)
 
         # remove items in group from graphs, upper_bounds, and I to remove it from the working set
         for l in lbest:
@@ -523,15 +530,21 @@ def GoldenRecordCreation_Incremental(data, limit):
                 I[label].pop(r)
 
         path, group, upper_bounds, lbest = GenerateNextLargestGroup(graphs, upper_bounds, I, processed)
-
-
-def ApplyGrouping(values, transform_str):
+        
+    for change in changes:
+        data.iat[change[0], 1] = change[1]
+            
+def ApplyGrouping(values, transform_str, data, verbose):
     '''
     Helper method which applies a transformation to the group of candidates it targets
 
     arguments: values: strings to be transformed, transform_str: the string form of a transformation path
     '''
+    changes = []
+    new_df = data.copy()
     for val in values:
+        first_str = data.iloc[val[0]].iloc[1]
+        sec_str = data.iloc[val[1]].iloc[1]
         if transform_str != None:
             # split by transformation type
             steps = transform_str.replace("conststr", "sub").split("sub")
@@ -544,16 +557,20 @@ def ApplyGrouping(values, transform_str):
                         sub = list(filter(None, sub))
                         
                         # sub[0] contains first position and sub[0] contains second position for substring
-                        first = GetSubstringIndex(sub[0], val[0])
-                        second = GetSubstringIndex(sub[1], val[0])
+                        first = GetSubstringIndex(sub[0], first_str)
+                        second = GetSubstringIndex(sub[1], first_str)
 
-                        new_str += val[0][first:second]
+                        new_str += first_str[first:second]
                     # const string transformation
                     else:
                         new_str += step
-                    
-            print("\t", val[0], "|", val[1], "|", new_str)
+            
+            changes.append((val[0], new_str))
+            if verbose:
+                print("\t", first_str, "|", sec_str, "|", new_str)
 
+    return changes
+        
 
 # Driver ===============================================================================================================
 
@@ -561,10 +578,12 @@ if __name__ == "__main__":
     
     # setup command line args
     parser = argparse.ArgumentParser(description="Set the number of samples to test with")
-    parser.add_argument("--address", help="Number of address records to sample")
-    parser.add_argument("--author", help="Number of author records to sample")
+    parser.add_argument("--address", help="Number of address records to sample (only up to 162 is working due to speed)")
+    parser.add_argument("--author", help="Number of author records to sample (only up to 80 is working due to speed)")
 
     parser.add_argument("--incgrouping", help="indicates whether or not incremental grouping should be used, and to what degree")
+    parser.add_argument("--small", action='store_true', help="indicates whether or not a small test example should be used to show it working")
+    parser.add_argument("--verbose", action='store_true', help="indicates whether to print intermediate paths found")
 
     args = parser.parse_args()
 
@@ -574,18 +593,48 @@ if __name__ == "__main__":
         add_sample = args.address
     if args.author:
         auth_sample = args.author
-    
-    author_data, address_data = LoadData(add_sample, auth_sample)
+        
+    small = False
+    if args.small:
+        small = True
+        
+    verbose = False
+    if args.verbose:
+        verbose = True
 
-    if args.incgrouping:
-        try:
-            count = int(args.incgrouping)
-            if count <= 0:
-                raise
-        except:
-            raise "Argument to --incgrouping flag must be an integer greater than 0"
-        GoldenRecordCreation_Incremental(author_data, count)
-        GoldenRecordCreation_Incremental(address_data, count)
+    author_data, address_data = LoadData(add_sample, auth_sample, small)
+    
+    if small:
+        author_data = {'isbn': [1, 1, 1, 2, 2, 2, 3, 3, 3], 'author': ["Mary Lee", "Lee, Mary", "M. Lee", 
+                                                                       "Smith, James", "James Smith", "J. Smith", "Jim Choo", "Choo, Jim", "J. Choo"]}
+        author_data = pd.DataFrame(data=author_data)
+        if args.incgrouping:
+            try:
+                count = int(args.incgrouping)
+                if count <= 0:
+                    raise
+            except:
+                raise "Argument to --incgrouping flag must be an integer greater than 0"
+            GoldenRecordCreation_Incremental(author_data, count, verbose)
+            print(author_data.drop_duplicates())
+        else:
+            GoldenRecordCreation(author_data, verbose)
+            print(author_data.drop_duplicates())
+
     else:
-        GoldenRecordCreation(author_data)
-        GoldenRecordCreation_Incremental(address_data)
+        if args.incgrouping:
+            try:
+                count = int(args.incgrouping)
+                if count <= 0:
+                    raise
+            except:
+                raise "Argument to --incgrouping flag must be an integer greater than 0"
+            GoldenRecordCreation_Incremental(author_data, count, verbose)
+            print(author_data)
+            GoldenRecordCreation_Incremental(address_data, count, verbose)
+            print(address_data)
+        else:
+            GoldenRecordCreation(author_data, verbose)
+            print(author_data)
+            GoldenRecordCreation(address_data, verbose)
+            print(address_data)
